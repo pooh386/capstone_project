@@ -8,7 +8,7 @@
 
 팀원: 202055575 이동근 (강화학습 기반 자율 주행 및 인지 모델링)
 
-팀원: 윤민석 (MCU 기반 하위 제어 및 고신뢰성 통신 시스템)
+팀원: 202170116 윤민석 (MCU 기반 하위 제어 및 고신뢰성 통신 시스템)
 
 ---
 
@@ -251,3 +251,74 @@ IMU 로그는 안전 제어의 사후 검증에도 사용한다. 주행이 끝�
 | 경기 운영 자료 | 부산대학교 정보컴퓨터공학부 졸업과제 공지문 및 Push & Clean 종목 설명 자료 |
 
 ![image.png](attachment:b12a8c12-77fa-4f8a-a02e-32e4960a0e3b:image.png)
+
+
+
+```mermaid
+graph TD
+    subgraph Training_Sim [1. Isaac Sim Environment]
+        Sim_Env[Isaac Sim Parallel Env<br/>& Domain Randomization]
+        RL_Train[RL-based<br/>Vision-Action Policy Training]
+        Policy_Export[Policy Export]
+        
+        Sim_Env --> RL_Train
+        RL_Train --> Policy_Export
+    end
+
+    subgraph Inference_Jetson [2. Jetson Orin Nano - Real-time Inference]
+        Camera[Camera Observation]
+        Vision_Enc[Vision Encoder]
+        Policy_Net[Policy Network]
+        Action_Out[Action Output]
+        
+        Policy_Export -.->|Deploy| Policy_Net
+        Camera --> Vision_Enc
+        Vision_Enc --> Policy_Net
+        Policy_Net --> Action_Out
+    end
+
+    subgraph Control_STM32 [3. STM32 MCU - Low-Level Control]
+        UART_Rx[UART Command Receiver]
+        Safety[Safety Filter & Timeout]
+        PWM_Ctrl[Motor PWM Control]
+        IMU_Log[IMU Data Logging]
+        
+        Action_Out -- UART Comm --> UART_Rx
+        UART_Rx --> Safety
+        Safety --> PWM_Ctrl
+    end
+
+    subgraph Physical_Env [4. Real Environment & JetBot]
+        Motors[JetBot Motors]
+        Dynamics[Physical Dynamics & Block Push]
+        Sensors[IMU Accelerometer / Gyro]
+        
+        PWM_Ctrl --> Motors
+        Motors --> Dynamics
+        Dynamics --> Sensors
+        Sensors --> IMU_Log
+    end
+
+    subgraph Stability_Eval [5. Performance Analysis & Tuning]
+        Run_Result[Run Result &<br/>IMU Log Collection]
+        Stability_Analys[Stability Analysis<br/>Vibration, Jerk, Impact]
+        Reward_Tune[Sim-to-Real Tuning<br/>& Reward Shaping]
+        
+        IMU_Log -- Log Data Export --> Run_Result
+        Run_Result --> Stability_Analys
+        Stability_Analys --> Reward_Tune
+        Reward_Tune -.->|Feedback Update| Sim_Env
+    end
+
+    classDef sim fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
+    classDef jetson fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
+    classDef stm fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef phy fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+    classDef eval fill:#ffebee,stroke:#f44336,stroke-width:2px;
+    
+    class Sim_Env,RL_Train,Policy_Export sim;
+    class Camera,Vision_Enc,Policy_Net,Action_Out jetson;
+    class UART_Rx,Safety,PWM_Ctrl,IMU_Log stm;
+    class Motors,Dynamics,Sensors phy;
+    class Run_Result,Stability_Analys,Reward_Tune eval;
+```
