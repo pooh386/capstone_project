@@ -30,7 +30,7 @@
 
 \reporttitle{Vision-Action Policy 기반\\ JetBot 자율 물체 수집 및 목표 구역 이동 시스템}
 \reportteam{Sim2Real}
-\reportauthor{202045106 김주환\\202055575 이동근\\윤민석}
+\reportauthor{202045106 김주환\\202055575 이동근\\202170116 윤민석}
 \reportadvisor{김종덕}
 \reportdate{2026년 5월 15일}
 
@@ -46,6 +46,8 @@
 \chapter{과제 개요}
 
 \section{과제 배경 및 필요성}
+
+\textbf{< VLA (vision-language-action model) 을 언급하는게 좋을까? >}
 
 본 과제는 JetBot 기반 자율 RC카가 제한된 경기장 안에서 카메라를 이용해 주변 환경을 인식하고, 무작위로 배치된 스펀지 블록을 목표 구역으로 이동시키는 피지컬 AI 시스템을 설계하고 구현하는 것을 목표로 한다. 경기 환경은 1.5--2m 크기의 정사각형 경기장으로 구성되며, 벽은 없고 검은색 테이프 경계선만 존재한다. 경기장 내부에는 5cm $\times$ 5cm $\times$ 5cm 크기의 경량 스펀지 블록 5개가 배치되고, 로봇은 이를 30cm $\times$ 30cm 크기의 붉은색 테이프 목표 구역으로 밀어(push) 넣어야 한다.
 
@@ -92,7 +94,7 @@ Jetson Orin Nano와 STM32 MCU를 분리한 계층형 구조는 학습 기반 판
 
 이 규칙은 시스템 관점에서 단순한 주행 문제가 아니라 무작위 환경에서의 접촉 기반 물체 이동 문제로 해석할 수 있다. 로봇은 블록을 밀어서 이동시키므로 접촉 위치, push 각도, 바닥 마찰, 로봇의 회전 흔들림이 결과에 영향을 주며, 전체 작업 시간도 함께 고려해야 한다. 따라서 본 프로젝트에서는 Isaac Sim 기반 병렬 강화학습으로 다양한 블록 배치와 물리 조건을 경험한 Vision-Action Policy를 학습시키고, 실제 JetBot 적용 단계에서는 성공 블록 수뿐 아니라 IMU 로그 기반 진동·급회전·충격 분석을 통해 주행 안정성과 시스템 신뢰성도 함께 평가한다.
 
-\section{기능적 요구사항}
+\sectionsection{기능적 요구사항}
 
 본 시스템은 시뮬레이션 학습, 실제 로봇 적용, 저수준 제어, 주행 품질 평가가 연결된 구조로 설계한다. 핵심 기능 요구사항은 다음과 같다.
 
@@ -126,21 +128,92 @@ Isaac Sim에서 학습한 정책을 실제 JetBot에 적용하기 위해서는 s
 
 \section{전체 시스템 아키텍처}
 
-본 과제의 시스템은 Isaac Sim 기반 학습 환경, Vision-Action Policy, Jetson Orin Nano 기반 실시간 추론 모듈, STM32 MCU 기반 저수준 제어 모듈, IMU 로그 기반 평가 모듈로 구성한다. 전체 구조는 Isaac Sim에서 다양한 주행 상황을 병렬로 구성하여 Vision-Action Policy를 학습하고, 학습된 정책을 Jetson Orin Nano 기반 실제 JetBot에 적용한 뒤, 주행 결과와 IMU 로그를 함께 분석하여 sim-to-real 차이와 주행 안정성을 개선하는 방식으로 설계한다.
+본 시스템은 '학습-실행-제어-분석'이 유기적으로 순환하는 계층형 아키텍처로 설계되었다. NVIDIA Isaac Sim 기반의 가상 환경에서 학습된 지능형 정책이 실제 JetBot의 Jetson Orin Nano에서 추론되고, STM32 MCU를 통해 정밀 제어 및 주행 데이터 로깅을 수행하는 구조이다.
 
 \begin{lstlisting}[language=mermaid,caption={전체 시스템 아키텍처 Mermaid 표현}]
-flowchart LR
-    A[Isaac Sim Parallel Environment] --> B[RL-based<br/>Vision-Action Policy Training]
-    B --> C[Policy Export]
-    C --> D[Jetson Orin Nano<br/>Real-time Policy Inference]
-    D --> E[STM32 MCU<br/>Low-level Motor Control]
-    E --> F[JetBot Driving<br/>and Block Push]
-    F --> G[Run Result<br/>and IMU Log Collection]
-    G --> H[Performance Analysis<br/>and Sim-to-Real Tuning]
-    H --> A
+graph LR
+    subgraph Training_Sim [1. Isaac Sim Environment]
+        direction TB
+        Sim_Env[Isaac Sim Parallel Env<br/>& Domain Randomization]
+        RL_Train[RL-based<br/>Vision-Action Policy Training]
+        Policy_Export[Policy Export]
+        
+        Sim_Env --> RL_Train
+        RL_Train --> Policy_Export
+    end
+
+    subgraph Inference_Jetson [2. Jetson Orin Nano - Real-time Inference]
+        direction TB
+        Camera[Camera Observation]
+        Vision_Enc[Vision Encoder]
+        Policy_Net[Policy Network]
+        Action_Out[Action Output]
+        
+        Policy_Export -.->|Deploy| Policy_Net
+        Camera --> Vision_Enc
+        Vision_Enc --> Policy_Net
+        Policy_Net --> Action_Out
+    end
+
+    subgraph Control_STM32 [3. STM32 MCU - Low-Level Control]
+        direction TB
+        UART_Rx[UART Command Receiver]
+        Safety[Safety Filter & Timeout]
+        PWM_Ctrl[Motor PWM Control]
+        IMU_Log[IMU Data Logging]
+        
+        Action_Out -- UART Comm --> UART_Rx
+        UART_Rx --> Safety
+        Safety --> PWM_Ctrl
+    end
+
+    subgraph Physical_Env [4. Real Environment & JetBot]
+        direction TB
+        Motors[JetBot Motors]
+        Dynamics[Physical Dynamics & Block Push]
+        Sensors[IMU Accelerometer / Gyro]
+        
+        PWM_Ctrl --> Motors
+        Motors --> Dynamics
+        Dynamics --> Sensors
+        Sensors --> IMU_Log
+    end
+
+    subgraph Stability_Eval [5. Performance Analysis & Tuning]
+        direction TB
+        Run_Result[Run Result &<br/>IMU Log Collection]
+        Stability_Analys[Stability Analysis<br/>Vibration, Jerk, Impact]
+        Reward_Tune[Sim-to-Real Tuning<br/>& Reward Shaping]
+        
+        IMU_Log -- Log Data Export --> Run_Result
+        Run_Result --> Stability_Analys
+        Stability_Analys --> Reward_Tune
+        Reward_Tune -.->|Feedback Update| Sim_Env
+    end
+
+    classDef sim fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#000000;
+    classDef jetson fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000000;
+    classDef stm fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#000000;
+    classDef phy fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#000000;
+    classDef eval fill:#ffebee,stroke:#f44336,stroke-width:2px,color:#000000;
+    
+    class Sim_Env,RL_Train,Policy_Export sim;
+    class Camera,Vision_Enc,Policy_Net,Action_Out jetson;
+    class UART_Rx,Safety,PWM_Ctrl,IMU_Log stm;
+    class Motors,Dynamics,Sensors phy;
+    class Run_Result,Stability_Analys,Reward_Tune eval;
 \end{lstlisting}
 
-이 구조에서 카메라는 로봇이 현재 환경을 관측하는 주 입력이며, policy는 해당 관측을 바탕으로 다음 행동을 결정한다. STM32 MCU는 policy가 결정한 명령을 실제 모터 동작으로 변환하고, 주행 중 가속도와 자이로 데이터를 기록한다. 본 장에서는 각 모듈의 세부 알고리즘을 확정하기보다, 어떤 모듈을 어떤 순서로 구현하고 검증할지에 대한 초기 설계 방향을 제시한다.
+전체적인 시스템 워크플로우는 다음과 같이 구성된다.
+\begin{enumerate}
+    \item \textbf{가상 학습 및 정책 도출(Simulation):} Isaac Sim 환경에서 Domain Randomization을 적용하여 다양한 물리 조건(마찰, 조명 등)을 병렬로 학습하고, 시각 관측으로부터 행동을 결정하는 최적의 Vision-Action Policy를 도출한다.
+    \item \textbf{실시간 추론 및 판단(Inference):} 학습된 정책을 Jetson Orin Nano에 이식하여 온보드 카메라 영상으로부터 행동 명령을 실시간으로 생성한다.
+    \item \textbf{저수준 제어 및 안전 보장(Control):} STM32 MCU는 UART로 수신한 명령을 모터 PWM 신호로 변환하여 실행하며, 통신 타임아웃 및 비상 정지 기능을 통해 하드웨어 수준의 안전성을 확보한다.
+    \item \textbf{데이터 로깅 및 품질 분석(QC):} 주행 중 IMU(가속도/자이로) 데이터를 고속으로 로깅하여 진동, 충격, 급회전 등 주행 안정성을 정량적으로 평가한다.
+    \item \textbf{Sim-to-Real 피드백:} 분석된 주행 품질 지표를 바탕으로 시뮬레이션 환경의 파라미터를 보정하고 강화학습 보상(Reward) 함수를 재설계함으로써 시스템의 신뢰성을 지속적으로 개선한다.
+\end{enumerate}
+
+이러한 계층적 설계를 통해 Jetson의 고수준 인공지능 판단과 STM32의 저수준 제어 안정성을 결합하고, 센서 기반의 사후 분석을 통해 주행 플랫폼의 완성도를 극대화하고자 한다. 
 
 \section{학습-실행-평가 파이프라인}
 
