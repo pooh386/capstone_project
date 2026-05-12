@@ -92,15 +92,77 @@ Isaac Sim에서 학습한 정책을 실제 JetBot에 적용하기 위해서는 s
 본 과제의 시스템은 Isaac Sim 기반 학습 환경, Vision-Action Policy, Jetson Orin Nano 기반 실시간 추론 모듈, STM32 MCU 기반 저수준 제어 모듈, IMU 로그 기반 평가 모듈로 구성한다. 전체 구조는 Isaac Sim에서 다양한 주행 상황을 병렬로 구성하여 Vision-Action Policy를 학습하고, 학습된 정책을 Jetson Orin Nano 기반 실제 JetBot에 적용한 뒤, 주행 결과와 IMU 로그를 함께 분석하여 sim-to-real 차이와 주행 안정성을 개선하는 방식으로 설계한다.
 
 ```mermaid
-flowchart LR
-    A[Isaac Sim 병렬 환경 구축] --> B[강화학습 기반<br/>Vision-Action Policy 학습]
-    B --> C[Policy Export]
-    C --> D[Jetson Orin Nano<br/>실시간 Policy 추론]
-    D --> E[STM32 MCU<br/>저수준 모터 제어]
-    E --> F[JetBot 주행 및<br/>블록 Push 수행]
-    F --> G[주행 결과 및<br/>IMU 로그 수집]
-    G --> H[성능 분석 및<br/>Sim-to-Real 보정]
-    H --> A
+graph LR
+    subgraph Training_Sim [1. Isaac Sim Environment]
+        direction TB
+        Sim_Env[Isaac Sim Parallel Env<br/>& Domain Randomization]
+        RL_Train[RL-based<br/>Vision-Action Policy Training]
+        Policy_Export[Policy Export]
+        
+        Sim_Env --> RL_Train
+        RL_Train --> Policy_Export
+    end
+
+    subgraph Inference_Jetson [2. Jetson Orin Nano - Real-time Inference]
+        direction TB
+        Camera[Camera Observation]
+        Vision_Enc[Vision Encoder]
+        Policy_Net[Policy Network]
+        Action_Out[Action Output]
+        
+        Policy_Export -.->|Deploy| Policy_Net
+        Camera --> Vision_Enc
+        Vision_Enc --> Policy_Net
+        Policy_Net --> Action_Out
+    end
+
+    subgraph Control_STM32 [3. STM32 MCU - Low-Level Control]
+        direction TB
+        UART_Rx[UART Command Receiver]
+        Safety[Safety Filter & Timeout]
+        PWM_Ctrl[Motor PWM Control]
+        IMU_Log[IMU Data Logging]
+        
+        Action_Out -- UART Comm --> UART_Rx
+        UART_Rx --> Safety
+        Safety --> PWM_Ctrl
+    end
+
+    subgraph Physical_Env [4. Real Environment & JetBot]
+        direction TB
+        Motors[JetBot Motors]
+        Dynamics[Physical Dynamics & Block Push]
+        Sensors[IMU Accelerometer / Gyro]
+        
+        PWM_Ctrl --> Motors
+        Motors --> Dynamics
+        Dynamics --> Sensors
+        Sensors --> IMU_Log
+    end
+
+    subgraph Stability_Eval [5. Performance Analysis & Tuning]
+        direction TB
+        Run_Result[Run Result &<br/>IMU Log Collection]
+        Stability_Analys[Stability Analysis<br/>Vibration, Jerk, Impact]
+        Reward_Tune[Sim-to-Real Tuning<br/>& Reward Shaping]
+        
+        IMU_Log -- Log Data Export --> Run_Result
+        Run_Result --> Stability_Analys
+        Stability_Analys --> Reward_Tune
+        Reward_Tune -.->|Feedback Update| Sim_Env
+    end
+
+    classDef sim fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
+    classDef jetson fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
+    classDef stm fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
+    classDef phy fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
+    classDef eval fill:#ffebee,stroke:#f44336,stroke-width:2px;
+    
+    class Sim_Env,RL_Train,Policy_Export sim;
+    class Camera,Vision_Enc,Policy_Net,Action_Out jetson;
+    class UART_Rx,Safety,PWM_Ctrl,IMU_Log stm;
+    class Motors,Dynamics,Sensors phy;
+    class Run_Result,Stability_Analys,Reward_Tune eval;
 ```
 
 이 구조에서 카메라는 로봇이 현재 환경을 관측하는 주 입력이며, policy는 해당 관측을 바탕으로 다음 행동을 결정한다. STM32 MCU는 policy가 결정한 명령을 실제 모터 동작으로 변환하고, 주행 중 가속도와 자이로 데이터를 기록한다. 본 장에서는 각 모듈의 세부 알고리즘을 확정하기보다, 어떤 모듈을 어떤 순서로 구현하고 검증할지에 대한 초기 설계 방향을 제시한다.
