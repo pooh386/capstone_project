@@ -89,7 +89,7 @@ Isaac Sim에서 학습한 정책을 실제 JetBot에 적용하기 위해서는 s
 
 ### 3.1 전체 시스템 아키텍처
 
-본 과제의 시스템은 Isaac Sim 기반 학습 환경, Vision-Action Policy, Jetson Orin Nano 기반 실시간 추론 모듈, STM32 MCU 기반 저수준 제어 모듈, IMU 로그 기반 평가 모듈로 구성한다. 전체 구조는 Isaac Sim에서 다양한 주행 상황을 병렬로 구성하여 Vision-Action Policy를 학습하고, 학습된 정책을 Jetson Orin Nano 기반 실제 JetBot에 적용한 뒤, 주행 결과와 IMU 로그를 함께 분석하여 sim-to-real 차이와 주행 안정성을 개선하는 방식으로 설계한다.
+본 시스템은 '학습-실행-제어-분석'이 유기적으로 순환하는 계층형 아키텍처로 설계되었다. NVIDIA Isaac Sim 기반의 가상 환경에서 학습된 지능형 정책이 실제 JetBot의 Jetson Orin Nano에서 추론되고, STM32 MCU를 통해 정밀 제어 및 주행 데이터 로깅을 수행하는 구조이다.
 
 ```mermaid
 graph LR
@@ -152,11 +152,12 @@ graph LR
         Reward_Tune -.->|Feedback Update| Sim_Env
     end
 
-    classDef sim fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px;
-    classDef jetson fill:#e3f2fd,stroke:#2196f3,stroke-width:2px;
-    classDef stm fill:#fff3e0,stroke:#ff9800,stroke-width:2px;
-    classDef phy fill:#e8f5e9,stroke:#4caf50,stroke-width:2px;
-    classDef eval fill:#ffebee,stroke:#f44336,stroke-width:2px;
+    %% 여기에 color:#000000 속성을 추가하여 글씨를 검정색으로 고정했습니다.
+    classDef sim fill:#f3e5f5,stroke:#9c27b0,stroke-width:2px,color:#000000;
+    classDef jetson fill:#e3f2fd,stroke:#2196f3,stroke-width:2px,color:#000000;
+    classDef stm fill:#fff3e0,stroke:#ff9800,stroke-width:2px,color:#000000;
+    classDef phy fill:#e8f5e9,stroke:#4caf50,stroke-width:2px,color:#000000;
+    classDef eval fill:#ffebee,stroke:#f44336,stroke-width:2px,color:#000000;
     
     class Sim_Env,RL_Train,Policy_Export sim;
     class Camera,Vision_Enc,Policy_Net,Action_Out jetson;
@@ -165,7 +166,14 @@ graph LR
     class Run_Result,Stability_Analys,Reward_Tune eval;
 ```
 
-이 구조에서 카메라는 로봇이 현재 환경을 관측하는 주 입력이며, policy는 해당 관측을 바탕으로 다음 행동을 결정한다. STM32 MCU는 policy가 결정한 명령을 실제 모터 동작으로 변환하고, 주행 중 가속도와 자이로 데이터를 기록한다. 본 장에서는 각 모듈의 세부 알고리즘을 확정하기보다, 어떤 모듈을 어떤 순서로 구현하고 검증할지에 대한 초기 설계 방향을 제시한다.
+전체적인 시스템 워크플로우는 다음과 같이 구성된다.
+1. 가상 학습 및 정책 도출(Simulation): Isaac Sim 환경에서 Domain Randomization을 적용하여 다양한 물리 조건(마찰, 조명 등)을 병렬로 학습하고, 시각 관측으로부터 행동을 결정하는 최적의 Vision-Action Policy를 도출한다.
+2. 실시간 추론 및 판단(Inference): 학습된 정책을 Jetson Orin Nano에 이식하여 온보드 카메라 영상으로부터 행동 명령을 실시간으로 생성한다.
+3. 저수준 제어 및 안전 보장(Control): STM32 MCU는 UART로 수신한 명령을 모터 PWM 신호로 변환하여 실행하며, 통신 타임아웃 및 비상 정지 기능을 통해 하드웨어 수준의 안전성을 확보한다.
+4. 데이터 로깅 및 품질 분석(QC): 주행 중 IMU(가속도/자이로) 데이터를 고속으로 로깅하여 진동, 충격, 급회전 등 주행 안정성을 정량적으로 평가한다.
+5. Sim-to-Real 피드백: 분석된 주행 품질 지표를 바탕으로 시뮬레이션 환경의 파라미터를 보정하고 강화학습 보상(Reward) 함수를 재설계함으로써 시스템의 신뢰성을 지속적으로 개선한다.
+
+이러한 계층적 설계를 통해 Jetson의 고수준 인공지능 판단과 STM32의 저수준 제어 안정성을 결합하고, 센서 기반의 사후 분석을 통해 주행 플랫폼의 완성도를 극대화하고자 한다. 
 
 ### 3.2 학습-실행-평가 파이프라인
 
